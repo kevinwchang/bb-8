@@ -93,20 +93,16 @@ void loop()
     uni_bt_enable_new_connections_safe(true);
   }
 
-  if (pairing)
-  {
-    // ~1 Hz blink
-    led((to_ms_since_boot(get_absolute_time()) >> 9) & 1);
-  }
-
   if (gamepad.connected)
   {
     pairing = false;
-    led(1);
 
-    if (absolute_time_diff_us(gamepad.last_update, get_absolute_time()) > 1000000)
+    // ~1 Hz short blink
+    led(((to_ms_since_boot(get_absolute_time()) >> 4) & 0x3F) == 0x3F);
+
+    if (absolute_time_diff_us(gamepad.last_update, get_absolute_time()) > 5000000)
     {
-      // disconnect if we haven't heard from the gamepad in 1s. It seems to have
+      // disconnect if we haven't heard from the gamepad in 5s. It seems to have
       // trouble reconnecting after that though...
       printf("timeout disconnect\n");
       uni_bt_disconnect_device_safe(0);
@@ -118,9 +114,15 @@ void loop()
       prev_buttons = gamepad.buttons;
     }
   }
+  else if (pairing)
+  {
+    // ~4 Hz fast blink
+    led((to_ms_since_boot(get_absolute_time()) >> 6) & 1);
+  }
   else
   {
-    led(0);
+    // ~0.5 Hz slow blink
+    led((to_ms_since_boot(get_absolute_time()) >> 10) & 1);
   }
 }
 
