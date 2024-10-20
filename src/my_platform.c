@@ -9,8 +9,7 @@
 #include <uni.h>
 
 #include "sdkconfig.h"
-
-uint16_t buttons;
+#include "gamepad_data.h"
 
 // Sanity check
 #ifndef CONFIG_BLUEPAD32_PLATFORM_CUSTOM
@@ -24,80 +23,80 @@ static void trigger_event_on_gamepad(uni_hid_device_t* d);
 // Platform Overrides
 //
 static void my_platform_init(int argc, const char** argv) {
-    ARG_UNUSED(argc);
-    ARG_UNUSED(argv);
+  ARG_UNUSED(argc);
+  ARG_UNUSED(argv);
 
-    logi("my_platform: init()\n");
+  logi("my_platform: init()\n");
 
 #if 0
-    uni_gamepad_mappings_t mappings = GAMEPAD_DEFAULT_MAPPINGS;
+  uni_gamepad_mappings_t mappings = GAMEPAD_DEFAULT_MAPPINGS;
 
-    // Inverted axis with inverted Y in RY.
-    mappings.axis_x = UNI_GAMEPAD_MAPPINGS_AXIS_RX;
-    mappings.axis_y = UNI_GAMEPAD_MAPPINGS_AXIS_RY;
-    mappings.axis_ry_inverted = true;
-    mappings.axis_rx = UNI_GAMEPAD_MAPPINGS_AXIS_X;
-    mappings.axis_ry = UNI_GAMEPAD_MAPPINGS_AXIS_Y;
+  // Inverted axis with inverted Y in RY.
+  mappings.axis_x = UNI_GAMEPAD_MAPPINGS_AXIS_RX;
+  mappings.axis_y = UNI_GAMEPAD_MAPPINGS_AXIS_RY;
+  mappings.axis_ry_inverted = true;
+  mappings.axis_rx = UNI_GAMEPAD_MAPPINGS_AXIS_X;
+  mappings.axis_ry = UNI_GAMEPAD_MAPPINGS_AXIS_Y;
 
-    // Invert A & B
-    mappings.button_a = UNI_GAMEPAD_MAPPINGS_BUTTON_B;
-    mappings.button_b = UNI_GAMEPAD_MAPPINGS_BUTTON_A;
+  // Invert A & B
+  mappings.button_a = UNI_GAMEPAD_MAPPINGS_BUTTON_B;
+  mappings.button_b = UNI_GAMEPAD_MAPPINGS_BUTTON_A;
 
-    uni_gamepad_set_mappings(&mappings);
+  uni_gamepad_set_mappings(&mappings);
 #endif
 }
 
 static void my_platform_on_init_complete(void) {
-    logi("my_platform: on_init_complete()\n");
+  logi("my_platform: on_init_complete()\n");
 
-    // Safe to call "unsafe" functions since they are called from BT thread
+  // Safe to call "unsafe" functions since they are called from BT thread
 
-    // Start scanning
-    uni_bt_enable_new_connections_unsafe(true);
+  // Start scanning
+  //uni_bt_enable_new_connections_unsafe(true);
 
-    // Based on runtime condition, you can delete or list the stored BT keys.
-    if (1)
-        uni_bt_del_keys_unsafe();
-    else
-        uni_bt_list_keys_unsafe();
+  uni_bt_list_keys_unsafe();
 
-    // Turn off LED once init is done.
-    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
-
-    //    uni_bt_service_set_enabled(true);
-
-    uni_property_dump_all();
+  uni_property_dump_all();
 }
 
 static uni_error_t my_platform_on_device_discovered(bd_addr_t addr, const char* name, uint16_t cod, uint8_t rssi) {
-    // You can filter discovered devices here. Return any value different from UNI_ERROR_SUCCESS;
-    // @param addr: the Bluetooth address
-    // @param name: could be NULL, could be zero-length, or might contain the name.
-    // @param cod: Class of Device. See "uni_bt_defines.h" for possible values.
-    // @param rssi: Received Signal Strength Indicator (RSSI) measured in dBms. The higher (255) the better.
+  // You can filter discovered devices here. Return any value different from UNI_ERROR_SUCCESS;
+  // @param addr: the Bluetooth address
+  // @param name: could be NULL, could be zero-length, or might contain the name.
+  // @param cod: Class of Device. See "uni_bt_defines.h" for possible values.
+  // @param rssi: Received Signal Strength Indicator (RSSI) measured in dBms. The higher (255) the better.
 
-    // As an example, if you want to filter out keyboards, do:
-    if (((cod & UNI_BT_COD_MINOR_MASK) & UNI_BT_COD_MINOR_KEYBOARD) == UNI_BT_COD_MINOR_KEYBOARD) {
-        logi("Ignoring keyboard\n");
-        return UNI_ERROR_IGNORE_DEVICE;
-    }
+  // filter out anything that isn't a gamepad
+  if (((cod & UNI_BT_COD_MINOR_MASK) & UNI_BT_COD_MINOR_GAMEPAD) != UNI_BT_COD_MINOR_GAMEPAD) {
+    logi("not a gamepad - ignoring\n");
+    return UNI_ERROR_IGNORE_DEVICE;
+  }
 
-    return UNI_ERROR_SUCCESS;
+  uni_bt_enable_new_connections_unsafe(false);
+
+  return UNI_ERROR_SUCCESS;
 }
 
 static void my_platform_on_device_connected(uni_hid_device_t* d) {
-    logi("my_platform: device connected: %p\n", d);
+  logi("my_platform: device connected: %p\n", d);
+
+  gamepad.last_update = get_absolute_time();
+  gamepad.connected = true;
 }
 
 static void my_platform_on_device_disconnected(uni_hid_device_t* d) {
-    logi("my_platform: device disconnected: %p\n", d);
+  logi("my_platform: device disconnected: %p\n", d);
+
+  gamepad.connected = false;
 }
 
 static uni_error_t my_platform_on_device_ready(uni_hid_device_t* d) {
-    logi("my_platform: device ready: %p\n", d);
+  logi("my_platform: device ready: %p\n", d);
 
-    // You can reject the connection by returning an error.
-    return UNI_ERROR_SUCCESS;
+  d->report_parser.set_player_leds(d, 1);
+
+  // You can reject the connection by returning an error.
+  return UNI_ERROR_SUCCESS;
 }
 
 static void my_platform_on_controller_data(uni_hid_device_t* d, uni_controller_t* ctl) {
@@ -119,7 +118,9 @@ static void my_platform_on_controller_data(uni_hid_device_t* d, uni_controller_t
         case UNI_CONTROLLER_CLASS_GAMEPAD:
             gp = &ctl->gamepad;
 
-            buttons = gp->buttons;
+            gamepad.last_update = get_absolute_time();
+            gamepad.buttons = gp->buttons;
+
 
             // Debugging
             // Axis ry: control rumble
@@ -133,9 +134,9 @@ static void my_platform_on_controller_data(uni_hid_device_t* d, uni_controller_t
                                                   0 /* weak magnitude */, 128 /* strong magnitude */);
             }
             // Buttons: Control LEDs On/Off
-            if ((gp->buttons & BUTTON_X) && d->report_parser.set_player_leds != NULL) {
+            /*if ((gp->buttons & BUTTON_X) && d->report_parser.set_player_leds != NULL) {
                 d->report_parser.set_player_leds(d, leds++ & 0x0f);
-            }
+            }*/
             // Axis: control RGB color
             if ((gp->buttons & BUTTON_Y) && d->report_parser.set_lightbar_color != NULL) {
                 uint8_t r = (gp->axis_x * 256) / 512;
@@ -175,8 +176,8 @@ static void my_platform_on_controller_data(uni_hid_device_t* d, uni_controller_t
 }
 
 static const uni_property_t* my_platform_get_property(uni_property_idx_t idx) {
-    ARG_UNUSED(idx);
-    return NULL;
+  ARG_UNUSED(idx);
+  return NULL;
 }
 
 static void my_platform_on_oob_event(uni_platform_oob_event_t event, void* data) {
@@ -229,18 +230,18 @@ static void trigger_event_on_gamepad(uni_hid_device_t* d) {
 // Entry Point
 //
 struct uni_platform* get_my_platform(void) {
-    static struct uni_platform plat = {
-        .name = "My Platform",
-        .init = my_platform_init,
-        .on_init_complete = my_platform_on_init_complete,
-        .on_device_discovered = my_platform_on_device_discovered,
-        .on_device_connected = my_platform_on_device_connected,
-        .on_device_disconnected = my_platform_on_device_disconnected,
-        .on_device_ready = my_platform_on_device_ready,
-        .on_oob_event = my_platform_on_oob_event,
-        .on_controller_data = my_platform_on_controller_data,
-        .get_property = my_platform_get_property,
-    };
+  static struct uni_platform plat = {
+    .name = "My Platform",
+    .init = my_platform_init,
+    .on_init_complete = my_platform_on_init_complete,
+    .on_device_discovered = my_platform_on_device_discovered,
+    .on_device_connected = my_platform_on_device_connected,
+    .on_device_disconnected = my_platform_on_device_disconnected,
+    .on_device_ready = my_platform_on_device_ready,
+    .on_oob_event = my_platform_on_oob_event,
+    .on_controller_data = my_platform_on_controller_data,
+    .get_property = my_platform_get_property,
+  };
 
-    return &plat;
+  return &plat;
 }
