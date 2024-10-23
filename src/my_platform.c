@@ -110,9 +110,18 @@ static void my_platform_on_controller_data(uni_hid_device_t* d, uni_controller_t
     //        return;
     //    }
     prev = *ctl;
-    // Print device Id before dumping gamepad.
-    logi("(%p) id=%d ", d, uni_hid_device_get_idx_for_instance(d));
-    uni_controller_dump(ctl);
+
+    const uint8_t n = 8; // dump once every n updates
+    static uint8_t count = n;
+
+    count--;
+    if (count == 0)
+    {
+      // Print device Id before dumping gamepad.
+      logi("(%p) id=%d ", d, uni_hid_device_get_idx_for_instance(d));
+      uni_controller_dump(ctl);
+      count = n;
+    }
 
     switch (ctl->klass) {
         case UNI_CONTROLLER_CLASS_GAMEPAD:

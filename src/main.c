@@ -31,6 +31,12 @@ typedef enum
   LedFlame = 13
 } Pins;
 
+#define SERVO_DOOR_CLOSED 1000
+#define SERVO_DOOR_OPEN 1800
+#define SERVO_EXTEND_IN 1900
+#define SERVO_EXTEND_OUT 1080
+#define SERVO_LIGHTER_DOWN 2000
+#define SERVO_LIGHTER_UP 940
 
 void led(bool on)
 {
@@ -69,12 +75,113 @@ bool __no_inline_not_in_flash_func(bootsel_is_pressed)()
   return r;
 }
 
+typedef enum
+{
+  ArmStowedIdle,
+  ArmStowed,
+  ArmDoorOpen,
+  ArmExtended,
+  ArmThumbUp,
+  ArmThumbUpIdle
+} ArmState;
+
+ArmState arm_state = ArmThumbUp; // so that we can run the retract sequence on startup
+alarm_id_t active_alarm = 0;
+
+int64_t arm_extend_cb(__unused alarm_id_t id, __unused void * user_data)
+{
+  //printf("arm_extend_cb state=%u\n", arm_state);
+
+  switch (arm_state)
+  {
+    case ArmStowedIdle:
+    case ArmStowed:
+      servo_microseconds(ServoDoor, SERVO_DOOR_OPEN);
+      arm_state = ArmDoorOpen;
+      return 300 * 1000;
+
+    case ArmDoorOpen:
+      servo_microseconds(ServoExtend, SERVO_EXTEND_OUT);
+      arm_state = ArmExtended;
+      return 400 * 1000;
+
+    case ArmExtended:
+      servo_microseconds(ServoLighter, SERVO_LIGHTER_UP);
+      gpio_put(LedFlame, 1);
+      arm_state = ArmThumbUp;
+      return 300 * 1000;
+
+    case ArmThumbUp:
+      servo_microseconds(ServoLighter, 0);
+      arm_state = ArmThumbUpIdle;
+      return 0;
+
+    default:
+      return 0;
+  }
+}
+
+void arm_extend()
+{
+  cancel_alarm(active_alarm);
+  active_alarm = add_alarm_in_us(0, arm_extend_cb, NULL, true);
+}
+
+int64_t arm_retract_cb(__unused alarm_id_t id, __unused void * user_data)
+{
+  //printf("arm_retract_cb state=%u\n", arm_state);
+
+  switch (arm_state)
+  {
+    case ArmThumbUpIdle:
+    case ArmThumbUp:
+      servo_microseconds(ServoLighter, SERVO_LIGHTER_DOWN);
+      gpio_put(LedFlame, 0);
+      arm_state = ArmExtended;
+      return 200 * 1000;
+
+    case ArmExtended:
+      servo_microseconds(ServoExtend, SERVO_EXTEND_IN);
+      arm_state = ArmDoorOpen;
+      return 300 * 1000;
+
+    case ArmDoorOpen:
+      servo_microseconds(ServoDoor, SERVO_DOOR_CLOSED);
+      arm_state = ArmStowed;
+      return 300 * 1000;
+
+    case ArmStowed:
+      servo_microseconds(ServoDoor, 0);
+      servo_microseconds(ServoLighter, 0);
+      arm_state = ArmStowedIdle;
+      return 0;
+
+    default:
+      return 0;
+  }
+}
+
+void arm_retract()
+{
+  cancel_alarm(active_alarm);
+  active_alarm = add_alarm_in_us(0, arm_retract_cb, NULL, true);
+}
+
 void servo_setup()
 {
   servo_init();
   servo_clock_auto();
 
   servo_attach(ServoHead);
+  servo_attach(ServoDoor);
+  servo_attach(ServoExtend);
+  servo_attach(ServoLighter);
+
+  // yeah yeah I know this isn't a servo
+  gpio_init(LedFlame);
+  gpio_set_dir(LedFlame, GPIO_OUT);
+
+  arm_retract();
 }
 
 int gamepad_setup()
@@ -133,6 +240,26 @@ void loop()
       // connected normally
       if (gamepad.new_data)
       {
+        if ((gamepad.buttons & BUTTON_Y) && !(prev_buttons & BUTTON_Y))
+        {
+          //printf("^ pressed state=%u\n", arm_state);
+
+          switch (arm_state)
+          {
+            case ArmStowedIdle:
+            //case ArmStowed:
+              arm_extend();
+              break;
+
+            case ArmThumbUpIdle:
+            //case ArmThumbUp:
+              arm_retract();
+              break;
+
+            default:
+              // arm is moving - don't interrupt it
+          }
+        }
         prev_buttons = gamepad.buttons;
 
         // deadzone
