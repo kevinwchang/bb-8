@@ -2,14 +2,15 @@
 // Need help? http://bit.ly/bluepad32-help
 
 #include <btstack_run_loop.h>
-#include <pico/cyw43_arch.h>
-#include <pico/stdlib.h>
 #include <hardware/structs/ioqspi.h>
 #include <hardware/sync.h>
+#include <pico_servo.h>
+#include <pico/cyw43_arch.h>
+#include <pico/stdlib.h>
 #include <uni.h>
 
-#include "sdkconfig.h"
 #include "gamepad_data.h"
+#include "sdkconfig.h"
 
 // Sanity check
 #ifndef CONFIG_BLUEPAD32_PLATFORM_CUSTOM
@@ -19,7 +20,17 @@
 // Defined in my_platform.c
 struct uni_platform* get_my_platform(void);
 
-struct gamepad_data gamepad = { .connected = false };
+struct gamepad_data gamepad = { .connected = false, .new_data = false };
+
+typedef enum
+{
+  ServoHead = 8,
+  ServoDoor = 9,
+  ServoExtend = 10,
+  ServoLighter = 11,
+  LedFlame = 13
+} Pins;
+
 
 void led(bool on)
 {
@@ -58,7 +69,15 @@ bool __no_inline_not_in_flash_func(bootsel_is_pressed)()
   return r;
 }
 
-int gamepad_init()
+void servo_setup()
+{
+  servo_init();
+  servo_clock_auto();
+
+  servo_attach(ServoHead);
+}
+
+int gamepad_setup()
 {
   // initialize CYW43 driver architecture (will enable BT if/because CYW43_ENABLE_BLUETOOTH == 1)
   if (cyw43_arch_init())
@@ -106,12 +125,34 @@ void loop()
       // trouble reconnecting after that though...
       printf("timeout disconnect\n");
       uni_bt_disconnect_device_safe(0);
+
+      servo_microseconds(ServoHead, 0);
     }
     else
     {
       // connected normally
+      if (gamepad.new_data)
+      {
+        prev_buttons = gamepad.buttons;
 
-      prev_buttons = gamepad.buttons;
+        // deadzone
+        if (gamepad.axis_x > 100)
+        {
+          gamepad.axis_x -= 100;
+        }
+        else if (gamepad.axis_x < -100)
+        {
+          gamepad.axis_x += 100;
+        }
+        else
+        {
+          gamepad.axis_x = 0;
+        }
+
+        servo_microseconds(ServoHead, 1500 - gamepad.axis_x);
+
+        gamepad.new_data = false;
+      }
     }
   }
   else if (pairing)
@@ -128,9 +169,9 @@ void loop()
 
 int main()
 {
-  stdio_init_all();
-
-  gamepad_init();
+  stdio_usb_init();
+  servo_setup();
+  gamepad_setup();
 
   while (true)
   {

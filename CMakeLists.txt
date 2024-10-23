@@ -9,16 +9,18 @@ else()
     set(PICO_BOARD "pico_w")
 endif()
 
-if (NOT BLUEPAD32_ROOT)
-    if (DEFINED ENV{BLUEPAD32_ROOT})
-        set(BLUEPAD32_ROOT $ENV{BLUEPAD32_ROOT})
-        message("Using BLUEPAD32_ROOT from environment ('${BLUEPAD32_ROOT}')")
-    else ()
-        message(FATAL_ERROR "BLUEPAD32_ROOT was not specified.")
+foreach(LIB_ROOT BLUEPAD32_ROOT PICO_SERVO_ROOT)
+    if (NOT ${LIB_ROOT})
+        if (DEFINED ENV{${LIB_ROOT}})
+            set(${LIB_ROOT} $ENV{${LIB_ROOT}})
+            message("Using ${LIB_ROOT} from environment ('${${LIB_ROOT}}')")
+        else ()
+            message(FATAL_ERROR "${LIB_ROOT} was not specified.")
+        endif ()
     endif ()
-endif ()
 
-get_filename_component(BLUEPAD32_ROOT "${BLUEPAD32_ROOT}" REALPATH BASE_DIR "${CMAKE_BINARY_DIR}")
+    get_filename_component(${LIB_ROOT} "${${LIB_ROOT}}" REALPATH BASE_DIR "${CMAKE_BINARY_DIR}")
+endforeach()
 
 # To use BTstack from Pico SDK do
 #set(BTSTACK_ROOT ${PICO_SDK_PATH}/lib/btstack)
@@ -44,7 +46,8 @@ add_executable(${PROGRAM}
 
 target_include_directories(${PROGRAM} PRIVATE
     src
-    ${BLUEPAD32_ROOT}/src/components/bluepad32/include)
+    ${BLUEPAD32_ROOT}/src/components/bluepad32/include
+    ${PICO_SERVO_ROOT}/include)
 
 # Needed for btstack_config.h / sdkconfig.h
 # so that libbluepad32 can include them
@@ -60,9 +63,11 @@ target_link_libraries(${PROGRAM} PUBLIC
     pico_btstack_classic
     pico_btstack_cyw43
     bluepad32
+    pico-servo
 )
 
 add_subdirectory(${BLUEPAD32_ROOT}/src/components/bluepad32 libbluepad32)
+add_subdirectory(${PICO_SERVO_ROOT} libpico-servo)
 
 pico_enable_stdio_usb(${PROGRAM} 1)
 pico_enable_stdio_uart(${PROGRAM} 0)

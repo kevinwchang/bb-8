@@ -119,55 +119,10 @@ static void my_platform_on_controller_data(uni_hid_device_t* d, uni_controller_t
             gp = &ctl->gamepad;
 
             gamepad.last_update = get_absolute_time();
+            gamepad.new_data = true;
+            gamepad.axis_x = gp->axis_x;
             gamepad.buttons = gp->buttons;
 
-
-            // Debugging
-            // Axis ry: control rumble
-            if ((gp->buttons & BUTTON_A) && d->report_parser.play_dual_rumble != NULL) {
-                d->report_parser.play_dual_rumble(d, 0 /* delayed start ms */, 250 /* duration ms */,
-                                                  128 /* weak magnitude */, 0 /* strong magnitude */);
-            }
-
-            if ((gp->buttons & BUTTON_B) && d->report_parser.play_dual_rumble != NULL) {
-                d->report_parser.play_dual_rumble(d, 0 /* delayed start ms */, 250 /* duration ms */,
-                                                  0 /* weak magnitude */, 128 /* strong magnitude */);
-            }
-            // Buttons: Control LEDs On/Off
-            /*if ((gp->buttons & BUTTON_X) && d->report_parser.set_player_leds != NULL) {
-                d->report_parser.set_player_leds(d, leds++ & 0x0f);
-            }*/
-            // Axis: control RGB color
-            if ((gp->buttons & BUTTON_Y) && d->report_parser.set_lightbar_color != NULL) {
-                uint8_t r = (gp->axis_x * 256) / 512;
-                uint8_t g = (gp->axis_y * 256) / 512;
-                uint8_t b = (gp->axis_rx * 256) / 512;
-                d->report_parser.set_lightbar_color(d, r, g, b);
-            }
-
-            // Toggle Bluetooth connections
-            if ((gp->buttons & BUTTON_SHOULDER_L) && enabled) {
-                logi("*** Disabling Bluetooth connections\n");
-                uni_bt_enable_new_connections_safe(false);
-                enabled = false;
-            }
-            if ((gp->buttons & BUTTON_SHOULDER_R) && !enabled) {
-                logi("*** Enabling Bluetooth connections\n");
-                uni_bt_enable_new_connections_safe(true);
-                enabled = true;
-            }
-            break;
-        case UNI_CONTROLLER_CLASS_BALANCE_BOARD:
-            // Do something
-            uni_balance_board_dump(&ctl->balance_board);
-            break;
-        case UNI_CONTROLLER_CLASS_MOUSE:
-            // Do something
-            uni_mouse_dump(&ctl->mouse);
-            break;
-        case UNI_CONTROLLER_CLASS_KEYBOARD:
-            // Do something
-            uni_keyboard_dump(&ctl->keyboard);
             break;
         default:
             loge("Unsupported controller class: %d\n", ctl->klass);
