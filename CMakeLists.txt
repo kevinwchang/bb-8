@@ -59,6 +59,7 @@ include_directories(${BTSTACK_ROOT}/3rd-party/bluedroid/decoder/include)
 
 target_link_libraries(${PROGRAM} PUBLIC
     pico_stdlib
+    pico_rand
     pico_cyw43_arch_none
     pico_btstack_classic
     pico_btstack_cyw43

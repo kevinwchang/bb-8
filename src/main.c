@@ -4,8 +4,10 @@
 #include <btstack_run_loop.h>
 #include <hardware/structs/ioqspi.h>
 #include <hardware/sync.h>
+#include <hardware/uart.h>
 #include <pico_servo.h>
 #include <pico/cyw43_arch.h>
+#include <pico/rand.h>
 #include <pico/stdlib.h>
 #include <uni.h>
 
@@ -20,7 +22,7 @@
 // Defined in my_platform.c
 struct uni_platform* get_my_platform(void);
 
-struct gamepad_data gamepad = { .connected = false, .new_data = false };
+struct gamepad_data gamepad = { .connected = false, .ready = false, .new_data = false, .joycon_side = ' ' };
 
 typedef enum
 {
@@ -75,6 +77,33 @@ bool __no_inline_not_in_flash_func(bootsel_is_pressed)()
   return r;
 }
 
+void sound_setup()
+{
+  uart_init(uart0, 9600);
+  gpio_set_function(28, GPIO_FUNC_UART);
+  uart_write_blocking(uart0, (uint8_t[]){0x7E, 0x02, 0x0C, 0xEF}, 4); // reset
+  sleep_ms(500);
+}
+
+void play_sound(uint16_t index)
+{
+  static uint8_t buf[6] = {0x7E, 0x04, 0x03, 0x00, 0x01, 0xEF};
+  buf[3] = (index >> 8) & 0xFF;
+  buf[4] = index & 0xFF;
+  uart_write_blocking(uart0, buf, 6);
+}
+
+void play_random_sound()
+{
+  const uint8_t count = 9; // number of random sounds; index 2 through [count + 1]
+  static uint8_t prev_sound = 255;
+
+  uint8_t sound = rand() / (RAND_MAX / (count - 1) + 1); // random number between 0 and [count - 2]
+  if (sound >= prev_sound) { sound++; } // shift results >= prev so we don't play the same sound twice
+  prev_sound = sound;
+  play_sound(2 + sound);
+}
+
 typedef enum
 {
   ArmStowedIdle,
@@ -101,6 +130,7 @@ int64_t arm_extend_cb(__unused alarm_id_t id, __unused void * user_data)
       return 300 * 1000;
 
     case ArmDoorOpen:
+      play_sound(1);
       servo_microseconds(ServoExtend, SERVO_EXTEND_OUT);
       arm_state = ArmExtended;
       return 400 * 1000;
@@ -206,12 +236,96 @@ int gamepad_setup()
   return 0;
 }
 
+void process_buttons()
+{
+  static uint16_t prev_buttons = 0;
+
+  int arm_button, sound_button;
+
+  switch (gamepad.joycon_side)
+  {
+    case 'L':
+      arm_button = BUTTON_X;
+      sound_button = BUTTON_B;
+      break;
+
+    case 'R':
+      arm_button = BUTTON_B;
+      sound_button = BUTTON_X;
+      break;
+
+    default:
+      arm_button = BUTTON_Y;
+      sound_button = BUTTON_A;
+  }
+
+  if ((gamepad.buttons & arm_button) && !(prev_buttons & arm_button))
+  {
+    //printf("^ pressed state=%u\n", arm_state);
+
+    switch (arm_state)
+    {
+      case ArmStowedIdle:
+      //case ArmStowed:
+        arm_extend();
+        break;
+
+      case ArmThumbUpIdle:
+      //case ArmThumbUp:
+        arm_retract();
+        break;
+
+      default:
+        // arm is moving - don't interrupt it
+    }
+  }
+  if ((gamepad.buttons & sound_button) && !(prev_buttons & sound_button))
+  {
+    play_random_sound();
+  }
+  prev_buttons = gamepad.buttons;
+}
+
+void update_head()
+{
+  int32_t axis;
+
+  switch (gamepad.joycon_side)
+  {
+    case 'L':
+      axis = gamepad.axis_y;
+      break;
+
+    case 'R':
+      axis = -gamepad.axis_y;
+      break;
+
+    default:
+      axis = -gamepad.axis_x;
+  }
+
+  const int32_t deadzone = 100;
+  if (axis > deadzone)
+  {
+    axis -= deadzone;
+  }
+  else if (axis < -deadzone)
+  {
+    axis += deadzone;
+  }
+  else
+  {
+    axis = 0;
+  }
+
+  servo_microseconds(ServoHead, 1500 + axis);
+}
+
 void loop()
 {
   static bool pairing = false;
-  static uint16_t prev_buttons = 0;
 
-  if(!pairing && bootsel_is_pressed())
+  if (!pairing && bootsel_is_pressed())
   {
     pairing = true;
     uni_bt_disconnect_device_safe(0);
@@ -235,49 +349,12 @@ void loop()
 
       servo_microseconds(ServoHead, 0);
     }
-    else
+    else if (gamepad.ready)
     {
-      // connected normally
       if (gamepad.new_data)
       {
-        if ((gamepad.buttons & BUTTON_Y) && !(prev_buttons & BUTTON_Y))
-        {
-          //printf("^ pressed state=%u\n", arm_state);
-
-          switch (arm_state)
-          {
-            case ArmStowedIdle:
-            //case ArmStowed:
-              arm_extend();
-              break;
-
-            case ArmThumbUpIdle:
-            //case ArmThumbUp:
-              arm_retract();
-              break;
-
-            default:
-              // arm is moving - don't interrupt it
-          }
-        }
-        prev_buttons = gamepad.buttons;
-
-        // deadzone
-        if (gamepad.axis_x > 100)
-        {
-          gamepad.axis_x -= 100;
-        }
-        else if (gamepad.axis_x < -100)
-        {
-          gamepad.axis_x += 100;
-        }
-        else
-        {
-          gamepad.axis_x = 0;
-        }
-
-        servo_microseconds(ServoHead, 1500 - gamepad.axis_x);
-
+        process_buttons();
+        update_head();
         gamepad.new_data = false;
       }
     }
@@ -296,7 +373,10 @@ void loop()
 
 int main()
 {
+  srand(get_rand_32());
+
   stdio_usb_init();
+  sound_setup();
   servo_setup();
   gamepad_setup();
 

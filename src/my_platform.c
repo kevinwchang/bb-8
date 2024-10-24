@@ -88,12 +88,27 @@ static void my_platform_on_device_disconnected(uni_hid_device_t* d) {
   logi("my_platform: device disconnected: %p\n", d);
 
   gamepad.connected = false;
+  gamepad.ready = false;
 }
 
 static uni_error_t my_platform_on_device_ready(uni_hid_device_t* d) {
   logi("my_platform: device ready: %p\n", d);
 
+  if (uni_hid_device_has_name(d))
+  {
+    if (strcmp(d->name, "Joy-Con (L)") == 0)
+    {
+      gamepad.joycon_side = 'L';
+    }
+    else if (strcmp(d->name, "Joy-Con (R)") == 0)
+    {
+      gamepad.joycon_side = 'R';
+    }
+  }
+  printf("Joy-Con side: %c\n", gamepad.joycon_side);
+
   d->report_parser.set_player_leds(d, 1);
+  gamepad.ready = true;
 
   // You can reject the connection by returning an error.
   return UNI_ERROR_SUCCESS;
@@ -130,6 +145,7 @@ static void my_platform_on_controller_data(uni_hid_device_t* d, uni_controller_t
             gamepad.last_update = get_absolute_time();
             gamepad.new_data = true;
             gamepad.axis_x = gp->axis_x;
+            gamepad.axis_y = gp->axis_y;
             gamepad.buttons = gp->buttons;
 
             break;
