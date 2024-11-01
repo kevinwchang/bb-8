@@ -304,21 +304,22 @@ void update_head()
       axis = -gamepad.axis_x;
   }
 
-  const int32_t deadzone = 100;
+  const int deadzone = 100;
+  uint signal;
   if (axis > deadzone)
   {
-    axis -= deadzone;
+    signal = 1500 + (axis - deadzone);
   }
   else if (axis < -deadzone)
   {
-    axis += deadzone;
+    signal = 1500 + (axis + deadzone);
   }
   else
   {
-    axis = 0;
+    signal = 0;
   }
 
-  servo_microseconds(ServoHead, 1500 + axis);
+  servo_microseconds(ServoHead, signal);
 }
 
 void loop()
